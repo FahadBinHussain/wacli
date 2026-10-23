@@ -45,3 +45,13 @@ wacli groups prune --dry-run
 wacli groups prune --days 180 --dry-run
 wacli groups prune --include-active --days 365 --dry-run
 ```
+
+## Verify local media bytes (Linux)
+
+`wacli --json store verify-media` opens only the local message index in read-only mode. It enumerates every nonempty message media path and local-media alias, including repeated paths and orphan aliases, then verifies each object against its stored plaintext SHA-256 and length when present. It does not connect to WhatsApp, fetch missing media, open `session.db`, change the originals, or publish a backup.
+
+Verified bytes are held temporarily in Linux `memfd` objects with kernel write, grow, shrink and seal locks. Foreign writes through an original path or retained original descriptor cannot alter those staged objects. This is an immutable content-object policy, **not ownership of the original external directories or their names**.
+
+The check is all-or-nothing: missing files, absent or malformed fingerprints, orphan metadata, mismatched bytes, unsupported kernels and cancellation fail the entire command. Limits of 1,024 references/descriptors and 256 MiB of staged bytes also fail the entire command; no reference is silently skipped. Originals are never deleted to satisfy a limit. Empty local paths do not identify locally downloaded objects, so this is not a check that every remote attachment has been downloaded.
+
+A successful result says `verified-byte-objects-only`, with `boundary: UNVERIFIED`, `complete: false` and `publishable: false`. The temporary descriptors are closed after reporting. Concurrent producers can still change database membership or the external roots, so this diagnostic is **not** a held whole-store frontier, a capture receipt, a restore or a Windows validation. Other platforms refuse immutable staging rather than weakening the contract.
