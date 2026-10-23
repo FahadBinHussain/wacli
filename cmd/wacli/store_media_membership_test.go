@@ -36,6 +36,12 @@ func TestStoreVerifyMediaSyntheticReferencesAndRefusal(t *testing.T) {
 	if err := db.MarkMediaDownloaded(chat, "m", media, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.UpsertMessage(store.UpsertMessageParams{ChatJID: chat, MsgID: "unknown-length", Timestamp: time.Now(), MediaType: "document", FileSHA256: sum[:]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkMediaDownloaded(chat, "unknown-length", media, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +60,7 @@ func TestStoreVerifyMediaSyntheticReferencesAndRefusal(t *testing.T) {
 		t.Fatalf("missing diagnostic data: %v", result)
 	}
 	result = dataResult
-	if result["checked_references"] != float64(1) || result["complete"] != false || result["capture_enabled"] != false || result["publishable"] != false || result["boundary"] != "UNVERIFIED" {
+	if result["checked_references"] != float64(2) || result["complete"] != false || result["capture_enabled"] != false || result["publishable"] != false || result["boundary"] != "UNVERIFIED" {
 		t.Fatalf("misleading report: %v", result)
 	}
 	if _, err := os.Stat(filepath.Join(root, "session.db")); !os.IsNotExist(err) {

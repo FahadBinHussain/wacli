@@ -58,7 +58,7 @@ SELECT 'alias:' || a.chat_jid || ':' || a.msg_id || ':' || a.local_path,
 		// database/sql may reuse its byte buffer; retain independent bytes.
 		copyDigest := append([]byte(nil), digest...)
 		var expectedLength *int64
-		if length.Valid {
+		if length.Valid && length.Int64 != 0 {
 			n := length.Int64
 			expectedLength = &n
 		}
