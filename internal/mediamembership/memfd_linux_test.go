@@ -14,6 +14,34 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestStageRejectsPresealDescriptorCorruption(t *testing.T) {
+	fd, err := unix.MemfdCreate("synthetic-preseal", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := os.NewFile(uintptr(fd), "synthetic-preseal")
+	defer f.Close()
+	expected := []byte("expected")
+	if _, err := f.Write(expected); err != nil {
+		t.Fatal(err)
+	}
+	alias, err := unix.Dup(fd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(alias)
+	if _, err := unix.Pwrite(alias, []byte("tampered"), 0); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(expected)
+	if err := sealAndVerify(t.Context(), f, sum[:], int64(len(expected))); err == nil {
+		t.Fatal("pre-seal corruption returned a verified object")
+	}
+	if _, err := unix.Pwrite(alias, []byte("x"), 0); !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("retained descriptor not sealed: %v", err)
+	}
+}
+
 func TestStageSealsAndPreservesBytes(t *testing.T) {
 	p := t.TempDir() + "/media"
 	original := []byte("immutable media bytes")

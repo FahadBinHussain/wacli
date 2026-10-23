@@ -166,15 +166,55 @@ func stageOne(ctx context.Context, ref Reference, remaining int64) (Blob, error)
 	if ref.ExpectedLength != nil && n != *ref.ExpectedLength {
 		return fail(fmt.Errorf("length mismatch: got %d", n))
 	}
-	if _, err := unix.FcntlInt(uintptr(mfd), unix.F_ADD_SEALS, unix.F_SEAL_WRITE|unix.F_SEAL_GROW|unix.F_SEAL_SHRINK|unix.F_SEAL_SEAL); err != nil {
-		return fail(fmt.Errorf("seal memfd: %w", err))
-	}
-	if err := ctx.Err(); err != nil {
+	if err := sealAndVerify(ctx, f, ref.ExpectedSHA256, n); err != nil {
 		return fail(err)
 	}
 	var verified [sha256.Size]byte
 	copy(verified[:], sum)
 	return Blob{Reference: ref, File: f, Size: n, SHA256: verified}, nil
+}
+
+func sealAndVerify(ctx context.Context, f *os.File, expected []byte, size int64) error {
+	if _, err := unix.FcntlInt(f.Fd(), unix.F_ADD_SEALS, unix.F_SEAL_WRITE|unix.F_SEAL_GROW|unix.F_SEAL_SHRINK|unix.F_SEAL_SEAL); err != nil {
+		return fmt.Errorf("seal memfd: %w", err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() != size {
+		return errors.New("sealed object length mismatch")
+	}
+	// A writable alias obtained before sealing must not let staged bytes differ
+	// from the bytes hashed while copying. ReadAt also avoids shared fd offsets.
+	hash := sha256.New()
+	buf := make([]byte, 32*1024)
+	for offset := int64(0); offset < size; {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		chunk := buf
+		if size-offset < int64(len(chunk)) {
+			chunk = chunk[:size-offset]
+		}
+		n, err := f.ReadAt(chunk, offset)
+		if err != nil {
+			return fmt.Errorf("read sealed object: %w", err)
+		}
+		if n != len(chunk) {
+			return io.ErrUnexpectedEOF
+		}
+		_, _ = hash.Write(chunk)
+		offset += int64(n)
+	}
+	if !equalBytes(hash.Sum(nil), expected) {
+		return errors.New("sealed object sha256 mismatch")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err = f.Seek(0, io.SeekStart)
+	return err
 }
 
 func equalBytes(a, b []byte) bool {
